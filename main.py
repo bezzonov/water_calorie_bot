@@ -7,6 +7,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 import re
+import base64
+# from charts import create_water_progress_chart, create_calorie_progress_chart
+
 
 from config import TELEGRAM_TOKEN
 from utils import (
@@ -14,18 +17,14 @@ from utils import (
     get_food_calories, get_workout_calories
 )
 
-# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Bot setup
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# User data storage
 users = {}
 
-# FSM States
 class ProfileStates(StatesGroup):
     waiting_weight = State()
     waiting_height = State()
@@ -46,12 +45,11 @@ async def start_handler(message: Message):
         "💧🤖 Добро пожаловать в трекер воды и калорий!\n\n"
         "Доступные команды:\n"
         "/set_profile - настроить профиль\n"
-        "/log_water <л> - залить воду\n"
+        "/log_water <мл.> - залить воду\n"
         "/log_food <продукт> - записать еду\n"
         "/log_workout <тип> <мин> - тренировка\n"
         "/check_progress - прогресс\n"
-        "/help - помощь"
-    )
+        "/help - помощь")
 
 @dp.message(Command('help'))
 async def help_handler(message: Message):
@@ -61,8 +59,7 @@ async def help_handler(message: Message):
         "• /log_water 500 - выпить 500 мл воды\n"
         "• /log_food банан - съесть банан\n"
         "• /log_workout бег 30 - пробежать 30 мин\n"
-        "• /check_progress - текущий прогресс"
-    )
+        "• /check_progress - текущий прогресс")
 
 @dp.message(Command('set_profile'))
 async def set_profile_start(message: Message, state: FSMContext):
@@ -111,25 +108,19 @@ async def process_activity(message: Message, state: FSMContext):
         activity = int(message.text)
         users[user_id]['activity'] = activity
         users[user_id]['city'] = users[user_id].get('city', 'Moscow')
-
-        # Update goals
         temp = await get_weather(users[user_id]['city'])
         users[user_id]['temperature'] = temp or 20
         users[user_id]['water_goal'] = calculate_water_goal(users[user_id])
         users[user_id]['calorie_goal'] = calculate_calorie_goal(users[user_id])
-
-        # Reset daily counters
         users[user_id]['logged_water'] = 0
         users[user_id]['logged_calories'] = 0
         users[user_id]['burned_calories'] = 0
-
         await state.clear()
         await message.answer(
             f"✅ Профиль сохранен!\n\n"
             f"💧 Норма воды: {users[user_id]['water_goal']:.0f} мл\n"
             f"🔥 Норма калорий: {users[user_id]['calorie_goal']:.0f} ккал\n"
-            f"🌡️ Температура: {temp or 20}°C"
-        )
+            f"🌡️ Температура: {temp or 20}°C")
     except ValueError:
         await message.answer("❌ Введите число! Попробуйте снова:")
 
@@ -138,55 +129,43 @@ async def log_water(message: Message):
     user_id = message.from_user.id
     if user_id not in users or 'water_goal' not in users[user_id]:
         return await message.answer("❌ Сначала настройте профиль: /set_profile")
-
     match = re.match(r'/log_water\s+(\d+)', message.text)
     if not match:
         return await message.answer("❌ Формат: /log_water 500")
-
     amount = float(match.group(1))
     users[user_id]['logged_water'] += amount
-
     remaining = max(0, users[user_id]['water_goal'] - users[user_id]['logged_water'])
     percent = min(100, (users[user_id]['logged_water'] / users[user_id]['water_goal']) * 100)
-
     await message.answer(
         f"💧 Записано {amount} мл\n"
         f"📊 Выпито: {users[user_id]['logged_water']:.0f} мл / {users[user_id]['water_goal']:.0f} мл\n"
-        f"💦 Осталось: {remaining:.0f} мл ({percent:.0f}%)"
-    )
+        f"💦 Осталось: {remaining:.0f} мл ({percent:.0f}%)")
 
 @dp.message(Command('log_food'))
 async def log_food_start(message: Message, state: FSMContext):
     user_id = message.from_user.id
     if user_id not in users:
         return await message.answer("❌ Сначала настройте профиль: /set_profile")
-
     match = re.match(r'/log_food\s+(.+)', message.text)
     if not match:
         return await message.answer("❌ Формат: /log_food банан")
-
     product = match.group(1).strip()
     food_data = get_food_calories(product)
-
     await state.update_data(product=product, food_data=food_data)
     await state.set_state(FoodStates.waiting_grams)
     await message.answer(
         f"🍌 {food_data['name']} — {food_data['cal']} ккал/100г\n"
-        f"📊 Сколько грамм вы съели?"
-    )
+        f"📊 Сколько грамм вы съели?")
 
 @dp.message(StateFilter(FoodStates.waiting_grams))
 async def process_food_grams(message: Message, state: FSMContext):
     user_id = message.from_user.id
     data = await state.get_data()
-
     try:
         grams = float(message.text)
         cal_per_100 = data['food_data']['cal']
         calories = (grams / 100) * cal_per_100
-
         users[user_id]['logged_calories'] += calories
-
         await state.clear()
         await message.answer(
             f"✅ Записано: {calories:.1f} ккал от {grams}г {data['product']}\n"
@@ -200,18 +179,14 @@ async def log_workout(message: Message):
     user_id = message.from_user.id
     if user_id not in users:
         return await message.answer("❌ Сначала настройте профиль: /set_profile")
-
     match = re.match(r'/log_workout\s+(\w+)\s+(\d+)', message.text)
     if not match:
         return await message.answer("❌ Формат: /log_workout бег 30")
-
     workout_type = match.group(1)
     minutes = int(match.group(2))
     weight = users[user_id].get('weight', 70)
-
     calories, water_extra = get_workout_calories(workout_type, minutes, weight)
     users[user_id]['burned_calories'] += calories
-
     await message.answer(
         f"🏃‍♂️ {workout_type.capitalize()} {minutes} мин\n"
         f"🔥 Сожжено: {calories} ккал\n"
@@ -224,25 +199,19 @@ async def check_progress(message: Message):
     user_id = message.from_user.id
     if user_id not in users or 'water_goal' not in users[user_id]:
         return await message.answer("❌ Сначала настройте профиль: /set_profile")
-
     user = users[user_id]
-
     water_progress = min(100, (user['logged_water'] / user['water_goal']) * 100)
     cal_consumed_progress = min(100, (user['logged_calories'] / user['calorie_goal']) * 100)
     net_calories = user['logged_calories'] - user['burned_calories']
-
     text = f"""📊 Прогресс за день:
-
 💧 Вода:
 • Выпито: {user['logged_water']:.0f}/{user['water_goal']:.0f} мл
 • Осталось: {max(0, user['water_goal']-user['logged_water']):.0f} мл
 • Прогресс: {water_progress:.0f}%
-
 🔥 Калории:
 • Потреблено: {user['logged_calories']:.0f}/{user['calorie_goal']:.0f} ккал
 • Сожжено: {user['burned_calories']:.0f} ккал
 • Баланс: {net_calories:.0f} ккал ({cal_consumed_progress:.0f}%)"""
-
     await message.answer(text)
 
 async def main():
