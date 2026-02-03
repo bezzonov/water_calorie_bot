@@ -8,7 +8,6 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 import re
 import base64
-# from charts import create_water_progress_chart, create_calorie_progress_chart
 
 
 from config import TELEGRAM_TOKEN
